@@ -1,4 +1,4 @@
-# 📚 Audiblez Gradio — Audiolivros com Kokoro-82M em português
+#  Audiblez Gradio — Audiolivros com Kokoro-82M em português
 
 Converte `.epub` em `.m4b` (com capítulos) usando o modelo de TTS
 [Kokoro-82M](https://github.com/hexgrad/kokoro), com uma **interface web
