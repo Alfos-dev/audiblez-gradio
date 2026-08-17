@@ -240,3 +240,45 @@ via `voice="voz1,voz2"`). A GUI expõe isso: escolha uma voz e "misturar com",
 gerando um **novo timbre** (ex.: `pf_dora,pm_alex`). Isso amplia as opções
 sem treinar nada. (Japonês/mandarim não aparecem na GUI: exigem
 `misaki[ja]`/`misaki[zh]`.)
+
+## 12. Leitura multidioma com a mesma voz
+
+Não existem **vozes multidiomas** oficiais no Kokoro-82M (todas as 54 vozes
+têm um idioma nativo definido pelo prefixo). Porém, como as vozes são
+**embeddings de estilo** sobre um **modelo compartilhado**, qualquer voz pode
+ser carregada em qualquer pipeline de idioma — o próprio kokoro permite isso
+(emite apenas o aviso "Language mismatch, loading X voice into Y pipeline").
+
+### O que foi implementado no fork (commit `0f088e1`)
+- `detect_lang_code()`: usa [`langdetect`](https://pypi.org/project/langdetect/)
+  por **frase** para mapear pt/en/es/fr/it/hi → código kokoro (a/e/f/h/i/p).
+  Frases curtas/ambíguas e nomes próprios caem no idioma nativo da voz
+  (ex.: "Arkham", "Miskatonic Avenue" são lidos com pronúncia pt-BR).
+- `make_lang_pipelines()`: cria uma `KPipeline` por idioma detectado, todas
+  compartilhando **um único `KModel`** — o timbre da voz fica idêntico e não
+  há recarga de modelo por idioma. Pipelines extras são criadas **lazy** (só
+  quando um idioma novo aparece).
+- Efeito prático: um livro em português com citações/nomes em inglês é narrado
+  com a **mesma voz** o tempo todo, mas as frases em inglês usam o G2P
+  correto do inglês (fonética certa). 
+
+### Dependência e fallback
+- `langdetect` é instalado pelo `install-audiblez.sh`.
+- Sem `langdetect`, o comportamento volta ao original (a voz só lê o idioma
+  nativo dela) — o `try/except` no `core.py` garante isso.
+- Testes feitos: mistura `pt+en` em 12s de áudio com `pf_dora`; detecção
+  correta em frases curtas de pt/en/es/fr.
+
+## 13. Prévia de voz na GUI
+
+A GUI (Gradio) tem o botão **"Ouvir prévia da voz"** que gera um trecho curto
+com os parâmetros atuais — voz, mistura, tom e pitch — para audição antes da
+conversão completa:
+
+- Gera o áudio via `KPipeline` direto no processo da GUI (não usa o audiblez),
+  com um texto de exemplo no idioma da voz (`PREVIEW_TEXTS`).
+- Aplica os mesmos filtros de tom (`build_audio_filter`) via ffmpeg, então o
+  que você ouve é exatamente o que sai no `.m4b`.
+- Resultado aparece num player `gr.Audio` (`.wav` se neutro/sem pitch, `.m4b`
+  se houver filtros).
+- Medido: ~8s para gerar a prévia de `pf_dora` neutra em CPU.
