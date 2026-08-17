@@ -21,6 +21,7 @@ Depois abra o link http://127.0.0.1:7860 que aparecer no terminal.
 
 import shutil
 import subprocess
+import sys
 import tempfile
 import traceback
 import uuid
@@ -175,8 +176,15 @@ def convert_epub(epub_file, voice, blend_voice, speed, tone, pitch_st, progress=
     progress(0, desc="Iniciando conversão...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        audiblez_bin = Path(sys.executable).parent / "audiblez"
+        if not audiblez_bin.exists():
+            return (
+                "Binário 'audiblez' não encontrado no venv "
+                f"({audiblez_bin}). Reinstale com install-audiblez.sh.",
+                None,
+            )
         cmd = [
-            "audiblez",
+            str(audiblez_bin),
             str(epub_path),
             "-v", voice_arg,
             "-s", str(speed),
