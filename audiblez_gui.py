@@ -10,6 +10,7 @@ Recursos:
   - Tom de narração (triste, feliz, assustado, raiva, indignado...)
     via filtros de áudio ffmpeg aplicados no resultado final
   - Controle manual de deslocamento de tom (semitons)
+  - Prévia de áudio para ouvir a voz escolhida antes de converter
 
 Uso:
     source ~/audiblez-env/bin/activate
@@ -21,9 +22,14 @@ Depois abra o link http://127.0.0.1:7860 que aparecer no terminal.
 import shutil
 import subprocess
 import tempfile
+import traceback
+import uuid
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 import gradio as gr
+from kokoro import KPipeline
 
 OUTPUT_DIR = Path.home() / "audiolivros"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -48,6 +54,17 @@ VOICES = {
     "🇫🇷 Francês": ["ff_siwis"],
     "🇮🇳 Hindi": ["hf_alpha", "hf_beta", "hm_omega", "hm_psi"],
     "🇮🇹 Italiano": ["if_sara", "im_nicola"],
+}
+
+# Texto de exemplo usado na prévia, um por idioma do Kokoro.
+PREVIEW_TEXTS = {
+    "a": "Hello! This is a quick preview of the selected voice.",
+    "b": "Hello! This is a quick preview of the selected voice.",
+    "e": "Hola, esta es una breve muestra de la voz seleccionada.",
+    "f": "Bonjour, ceci est un court aperçu de la voix choisie.",
+    "h": "नमस्ते, यह चयनित आवाज़ का एक संक्षिप्त पूर्वावलोकन है।",
+    "i": "Ciao, questa è una breve anteprima della voce scelta.",
+    "p": "Olá, esta é uma prévia rápida da voz selecionada.",
 }
 
 # Presets de tom. Cada preset define um deslocamento de tom (semitons),
@@ -103,6 +120,49 @@ def apply_tone_filter(m4b_in, m4b_out, tone, pitch_st):
         tmp_out.unlink(missing_ok=True)
         raise RuntimeError("Falha ao aplicar o tom de narração:\n" + (proc.stderr or proc.stdout)[-2000:])
     tmp_out.replace(str(m4b_out))
+
+
+def preview_voice(voice, blend_voice, tone, pitch_st, speed, progress=gr.Progress()):
+    """Gera um trecho curto de áudio com a voz selecionada (timbre, mistura,
+    tom e pitch) para o usuário ouvir antes de converter o livro inteiro."""
+    try:
+        progress(0, desc="Carregando modelo de voz...")
+        voice_arg = f"{voice},{blend_voice}" if blend_voice and blend_voice != "Nenhuma" else voice
+        lang = voice[0]
+        text = PREVIEW_TEXTS.get(lang, PREVIEW_TEXTS["a"])
+        pipeline = KPipeline(lang_code=lang)
+        audio_segments = [a for _, _, a in pipeline(text, voice=voice_arg, speed=float(speed))]
+        if not audio_segments:
+            return None, "Falha ao gerar prévia (nenhum áudio retornado)."
+        audio = np.concatenate(audio_segments)
+
+        progress(0.85, desc="Aplicando tom...")
+        tmp_wav = Path(tempfile.gettempdir()) / f"audiblez_preview_{uuid.uuid4().hex[:8]}.wav"
+        sf.write(str(tmp_wav), audio, SAMPLE_RATE)
+
+        chain = build_audio_filter(tone, pitch_st)
+        if chain:
+            tmp_out = Path(tempfile.gettempdir()) / f"audiblez_preview_{uuid.uuid4().hex[:8]}.m4b"
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(tmp_wav),
+                "-map", "0:a:0",
+                "-c:a", "aac", "-b:a", "192k",
+                "-af", chain,
+                "-f", "mp4",
+                str(tmp_out),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                tmp_wav.unlink(missing_ok=True)
+                return None, "Falha ao aplicar o tom na prévia:\n" + (proc.stderr or proc.stdout)[-800:]
+            tmp_wav.unlink(missing_ok=True)
+            return str(tmp_out), f"Prévia de **{voice_arg}** ({lang}) gerada."
+
+        return str(tmp_wav), f"Prévia de **{voice_arg}** ({lang}) gerada."
+    except Exception as e:
+        traceback.print_exc()
+        return None, f"Erro ao gerar prévia: {e}"
 
 
 def convert_epub(epub_file, voice, blend_voice, speed, tone, pitch_st, progress=gr.Progress(track_tqdm=True)):
@@ -188,11 +248,20 @@ with gr.Blocks(title="Audiblez GUI (Gradio)") as demo:
                 minimum=0.5, maximum=2.0, value=1.0, step=0.1,
                 label="Velocidade",
             )
+            preview_btn = gr.Button("Ouvir prévia da voz")
             convert_btn = gr.Button("Converter", variant="primary")
 
         with gr.Column():
+            preview_audio = gr.Audio(label="Prévia", type="filepath")
+            preview_status = gr.Markdown()
             status_output = gr.Textbox(label="Status / Log", lines=15)
             file_output = gr.File(label="Audiolivro gerado (.m4b)")
+
+    preview_btn.click(
+        fn=preview_voice,
+        inputs=[voice_input, blend_input, tone_input, pitch_input, speed_input],
+        outputs=[preview_audio, preview_status],
+    )
 
     convert_btn.click(
         fn=convert_epub,

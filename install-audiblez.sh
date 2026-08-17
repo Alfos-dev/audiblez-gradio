@@ -93,6 +93,7 @@ source "${VENV_DIR}/bin/activate"
 
 pip install --upgrade pip
 pip install audiblez
+pip install langdetect
 
 if [ "$WITH_GUI" = true ]; then
     info "Instalando gradio para a GUI web (navegador)..."
@@ -116,7 +117,9 @@ deactivate
 
 # --- 6. Aplicar patches do fork no audiblez instalado ------------------
 # O audiblez (PyPI 0.4.9) gera áudio MONO (só toca no fone esquerdo) e
-# arquivos PCM gigantes. Este patch re-encoda para AAC estéreo 192k.
+# arquivos PCM gigantes. Este patch re-encoda para AAC estéreo 192k e
+# adiciona detecção de idioma por frase (a mesma voz lê trechos em
+# pt/en/es/fr/it/hi com a fonética correta de cada idioma).
 PATCH_FILE="${SCRIPT_DIR}/patches/audiblez-core.patch"
 SITE_PACKAGES="$(find "$VENV_DIR" -maxdepth 4 -type d -name site-packages 2>/dev/null | head -1)"
 
@@ -124,7 +127,7 @@ if [ -n "$SITE_PACKAGES" ] && [ -f "$PATCH_FILE" ]; then
     if command -v patch &> /dev/null; then
         if (cd "$SITE_PACKAGES" && patch -p1 --forward --dry-run < "$PATCH_FILE" >/dev/null 2>&1); then
             (cd "$SITE_PACKAGES" && patch -p1 --forward < "$PATCH_FILE")
-            info "Patch aplicado: audiblez agora gera áudio estéreo AAC."
+            info "Patch aplicado: áudio estéreo AAC + leitura multidioma com a mesma voz."
         else
             warn "Patch não aplicado (já estava aplicado ou versão incompatível). Pulando."
         fi

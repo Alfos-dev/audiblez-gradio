@@ -1,13 +1,113 @@
-# Patches do Alfos-dev/audiblez aplicados sobre o audiblez 0.4.9 (PyPI)
-# Origem: https://github.com/Alfos-dev/audiblez
-# Base: tag v0.4.9 + 2 commits de fix
-# Aplicar em <venv>/lib/python3.12/site-packages com: patch -p1 < audiblez-core.patch
-
 diff --git a/audiblez/core.py b/audiblez/core.py
-index 3953d4b..61f1f65 100755
+index 3953d4b..3324e78 100755
 --- a/audiblez/core.py
 +++ b/audiblez/core.py
-@@ -298,7 +298,12 @@ def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
+@@ -69,6 +69,52 @@ def set_espeak_library():
+         print("On Linux: sudo apt install espeak-ng")
+ 
+ 
++# ISO 639-1 -> kokoro lang code. ja/zh need misaki[ja]/misaki[zh], so they are left out.
++LANG_CODE_MAP = {
++    'en': 'a',  # american english
++    'es': 'e',  # spanish
++    'fr': 'f',  # french
++    'hi': 'h',  # hindi
++    'it': 'i',  # italian
++    'pt': 'p',  # brazilian portuguese
++}
++
++
++def detect_lang_code(sentence, default_lang):
++    """Detect the language of a sentence and return a kokoro lang code.
++
++    Falls back to default_lang (the voice's native language) when langdetect
++    is not installed or the sentence is too short/ambiguous to detect.
++    """
++    try:
++        from langdetect import detect_langs
++        best = detect_langs(sentence)[0]
++    except Exception:
++        return default_lang
++    if best.prob >= 0.5 and best.lang in LANG_CODE_MAP:
++        return LANG_CODE_MAP[best.lang]
++    return default_lang
++
++
++def make_lang_pipelines(native_lang):
++    """Build a get_pipeline(lang) callable that lazily creates one KPipeline
++    per language, all sharing a single KModel.
++
++    Kokoro voices are style embeddings on a shared model, so passing the same
++    voice to every pipeline keeps its timbre while each language G2P produces
++    the right phonemes (e.g. an English quote inside a Portuguese book).
++    """
++    pipelines = {native_lang: KPipeline(lang_code=native_lang)}
++    model = pipelines[native_lang].model
++
++    def get_pipeline(lang):
++        if lang not in pipelines:
++            pipelines[lang] = KPipeline(lang_code=lang, model=model)
++        return pipelines[lang]
++
++    return get_pipeline
++
++
+ def main(file_path, voice, pick_manually, speed, output_folder='.',
+          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None):
+     if post_event: post_event('CORE_STARTED')
+@@ -114,7 +160,8 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
+     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
+     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
+     set_espeak_library()
+-    pipeline = KPipeline(lang_code=voice[0])  # a for american or b for british etc.
++    native_lang = voice[0]  # a for american or b for british etc.
++    get_pipeline = make_lang_pipelines(native_lang)
+ 
+     chapter_wav_files = []
+     for i, chapter in enumerate(selected_chapters, start=1):
+@@ -139,7 +186,8 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
+         start_time = time.time()
+         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
+         audio_segments = gen_audio_segments(
+-            pipeline, text, voice, speed, stats, post_event=post_event, max_sentences=max_sentences)
++            get_pipeline, text, voice, speed, stats,
++            post_event=post_event, max_sentences=max_sentences, default_lang=native_lang)
+         if audio_segments:
+             final_audio = np.concatenate(audio_segments)
+             soundfile.write(chapter_wav_path, final_audio, sample_rate)
+@@ -190,15 +238,17 @@ def print_selected_chapters(document_chapters, chapters):
+     ], headers=['#', 'Chapter', 'Text Length', 'Selected', 'First words']))
+ 
+ 
+-def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=None, post_event=None):
++def gen_audio_segments(get_pipeline, text, voice, speed, stats=None, max_sentences=None, post_event=None, default_lang=None):
+     nlp = spacy.load('xx_ent_wiki_sm')
+     nlp.add_pipe('sentencizer')
+     audio_segments = []
+     doc = nlp(text)
+     sentences = list(doc.sents)
++    default_lang = default_lang or (voice[0] if voice else 'a')
+     for i, sent in enumerate(sentences):
+         if max_sentences and i > max_sentences: break
+-        for gs, ps, audio in pipeline(sent.text, voice=voice, speed=speed, split_pattern=r'\n\n\n'):
++        lang = detect_lang_code(sent.text, default_lang)
++        for gs, ps, audio in get_pipeline(lang)(sent.text, voice=voice, speed=speed, split_pattern=r'\n\n\n'):
+             audio_segments.append(audio)
+         if stats:
+             stats.processed_chars += len(sent.text)
+@@ -212,9 +262,9 @@ def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=N
+ 
+ def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False):
+     lang_code = voice[:1]
+-    pipeline = KPipeline(lang_code=lang_code)
++    get_pipeline = make_lang_pipelines(lang_code)
+     load_spacy()
+-    audio_segments = gen_audio_segments(pipeline, text, voice=voice, speed=speed);
++    audio_segments = gen_audio_segments(get_pipeline, text, voice=voice, speed=speed, default_lang=lang_code)
+     final_audio = np.concatenate(audio_segments)
+     soundfile.write(output_file, final_audio, sample_rate)
+     if play:
+@@ -298,7 +348,12 @@ def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
          for wav_file in chapter_files:
              f.write(f"file '{wav_file}'\n")
      concat_file_path = Path(output_folder) / filename.replace('.epub', '.tmp.mp4')
@@ -21,7 +121,7 @@ index 3953d4b..61f1f65 100755
      Path(wav_list_txt).unlink()
      return concat_file_path
  
-@@ -313,7 +318,7 @@ def create_m4b(chapter_files, filename, cover_image, output_folder):
+@@ -313,7 +368,7 @@ def create_m4b(chapter_files, filename, cover_image, output_folder):
          cover_file_path = Path(output_folder) / 'cover'
          with open(cover_file_path, 'wb') as f:
              f.write(cover_image)
