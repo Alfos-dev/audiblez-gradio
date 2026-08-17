@@ -1,0 +1,32 @@
+# Patches do Alfos-dev/audiblez aplicados sobre o audiblez 0.4.9 (PyPI)
+# Origem: https://github.com/Alfos-dev/audiblez
+# Base: tag v0.4.9 + 2 commits de fix
+# Aplicar em <venv>/lib/python3.12/site-packages com: patch -p1 < audiblez-core.patch
+
+diff --git a/audiblez/core.py b/audiblez/core.py
+index 3953d4b..61f1f65 100755
+--- a/audiblez/core.py
++++ b/audiblez/core.py
+@@ -298,7 +298,12 @@ def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
+         for wav_file in chapter_files:
+             f.write(f"file '{wav_file}'\n")
+     concat_file_path = Path(output_folder) / filename.replace('.epub', '.tmp.mp4')
+-    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', wav_list_txt, '-c', 'copy', concat_file_path])
++    # Re-encode to stereo AAC: mono only plays on the left channel in many
++    # players, and PCM made the files huge. Stereo is created by duplicating
++    # the mono channel (pan to both sides). 'aac' (native encoder) is used
++    # instead of 'libfdk_aac' so it works on stock ffmpeg builds.
++    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', wav_list_txt,
++                    '-c:a', 'aac', '-b:a', '192k', '-ac', '2', concat_file_path])
+     Path(wav_list_txt).unlink()
+     return concat_file_path
+ 
+@@ -313,7 +318,7 @@ def create_m4b(chapter_files, filename, cover_image, output_folder):
+         cover_file_path = Path(output_folder) / 'cover'
+         with open(cover_file_path, 'wb') as f:
+             f.write(cover_image)
+-        cover_image_args = ["-i", f'{cover_file_path}', "-map", "0:a", "-map", "2:v"]
++        cover_image_args = ["-i", f'{cover_file_path}', "-map", "2:v"]
+     else:
+         cover_image_args = []
+ 

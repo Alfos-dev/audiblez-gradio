@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Atalho da GUI Gradio do Audiblez (criado por install-audiblez.sh)
+source "$HOME/audiblez-env/bin/activate"
+exec python "$HOME/audiblez_gui.py" "$@"

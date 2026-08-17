@@ -1,0 +1,27 @@
+# Ambiente virtual do Python
+audiblez-env/
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Modelos baixados do Hugging Face (baixados sob demanda na primeira execução)
+.cache/
+*.pth
+*.bin
+
+# Pasta de trabalho do Audiblez
+livros/
+audiolivros/
+*.m4b
+*.wav
+*.mp3
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
